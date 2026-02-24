@@ -28,10 +28,14 @@ const THEMES: Record<string, any> = {
 };
 const THEME_KEYS = Object.keys(THEMES);
 
+// --- DISTINCT PIE CHART COLORS (For Top 10) ---
 const PIE_COLORS = ['#f43f5e', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#d946ef', '#84cc16', '#f97316', '#64748b'];
+
+// Universal Educational Assets
 const UNIVERSAL_SYMBOLS = ['0', '1', 'A', 'Ω', '∑', 'π', '✓', 'Δ', '{ }', '< />', '?', '∞', '⚛'];
 const UNIVERSAL_QUOTES = ["Knowledge is power.", "Education is the passport to the future.", "Discipline equals freedom.", "Consistency is key to mastery.", "Every expert was once a beginner.", "Keep pushing forward!", "Success is built one day at a time."];
 
+// Helper: Get theme from email
 const getUserTheme = (email: string | undefined) => {
   if (!email) return THEMES['emerald'];
   let hash = 0;
@@ -39,6 +43,7 @@ const getUserTheme = (email: string | undefined) => {
   return THEMES[THEME_KEYS[hash % THEME_KEYS.length]];
 };
 
+// Helper: Rank Crown Component
 const Crown = ({ rank, themeColor }: { rank: number, themeColor: string }) => {
   const colors = ['#FFD700', '#C0C0C0', '#CD7F32'];
   if (rank > 3) return <span style={{ width: '24px', display: 'inline-block' }}></span>;
@@ -49,8 +54,10 @@ const Crown = ({ rank, themeColor }: { rank: number, themeColor: string }) => {
   );
 };
 
+// --- 2. FLOATING BACKGROUND COMPONENT ---
 const FloatingBackground = ({ lightColor, onSymbolClick }: { lightColor: string, onSymbolClick: () => void }) => {
   const [elements, setElements] = useState<any[]>([]);
+
   useEffect(() => {
     setElements(Array.from({ length: 30 }).map((_, i) => ({
       id: i, val: UNIVERSAL_SYMBOLS[Math.floor(Math.random() * UNIVERSAL_SYMBOLS.length)],
@@ -58,6 +65,7 @@ const FloatingBackground = ({ lightColor, onSymbolClick }: { lightColor: string,
       size: `${16 + Math.random() * 30}px`, duration: `${15 + Math.random() * 20}s`, delay: `${Math.random() * 15}s`
     })));
   }, []);
+
   return (
     <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 0, overflow: 'hidden', pointerEvents: 'none' }}>
       {elements.map((el) => (
@@ -71,11 +79,13 @@ const FloatingBackground = ({ lightColor, onSymbolClick }: { lightColor: string,
 
 // --- 3. MAIN DASHBOARD COMPONENT ---
 export default function Dashboard() {
+  // Auth & User State
   const [teacher, setTeacher] = useState<any>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
 
+  // Data State
   const [subjects, setSubjects] = useState<any[]>([]);
   const [activeSubject, setActiveSubject] = useState<any>(null);
   const [selectedClass, setSelectedClass] = useState<string>('All Sections');
@@ -83,11 +93,13 @@ export default function Dashboard() {
   const [students, setStudents] = useState<any[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<any | null>(null);
 
+  // UI State
   const [showAddSubject, setShowAddSubject] = useState(false);
   const [dialogueBox, setDialogueBox] = useState<string | null>(null);
   const [chartType, setChartType] = useState<'bar' | 'line' | 'pie'>('bar');
   const [showThemePicker, setShowThemePicker] = useState(false);
 
+  // New Subject Form State
   const [newSubName, setNewSubName] = useState('');
   const [newSubStart, setNewSubStart] = useState(2020);
   const [newSubEnd, setNewSubEnd] = useState(2025);
@@ -97,6 +109,7 @@ export default function Dashboard() {
 
   const availableClassesList = ['Level 3', 'Level 4', 'A1', 'A2', 'A3'];
 
+  // --- INITIAL LOAD ---
   useEffect(() => {
     const stored = localStorage.getItem('school_teacher_auth');
     if (stored) {
@@ -106,6 +119,9 @@ export default function Dashboard() {
     }
   }, []);
 
+  // --- DATA FETCHING ---
+
+  // RE-ADDED MISSING fetchSubjects FUNCTION
   async function fetchSubjects(tId: string) {
     const { data } = await supabase.from('subjects').select('*').eq('teacher_id', tId);
     if (data && data.length > 0) {
@@ -118,6 +134,61 @@ export default function Dashboard() {
     }
   }
 
+ async function fetchClassData() {
+    if (!activeSubject) return;
+
+    const { data: classesData } = await supabase.from('classes').select('id, name');
+    const classMap: Record<string, string> = {};
+    classesData?.forEach(c => { classMap[c.id] = c.name; });
+
+    const { data: progData } = await supabase.from('subject_progress').select('student_id, progress').eq('subject_id', activeSubject.id);
+    const progMap: Record<string, number> = {};
+    progData?.forEach((p: any) => { progMap[p.student_id] = p.progress; });
+
+    const { data } = await supabase.from('students').select('id, name, class_id, exam_entries(p1, p2, p3, p4, session_name, subject_id)');
+    const relevantStudents = (data || []).filter(s => activeSubject.classes.includes(classMap[s.class_id]));
+
+    const processed: any[] = relevantStudents.map(s => {
+      let activeSessionsCount = 0;
+      let grandTotal = 0;
+
+      const currentSubjectEntries = s.exam_entries.filter((e: any) => e.subject_id === activeSubject.id);
+
+      currentSubjectEntries.forEach((e: any) => {
+        let sessionTotal = 0;
+        activeSubject.papers?.forEach((_: any, i: number) => { sessionTotal += (Number(e[`p${i+1}`]) || 0); });
+        grandTotal += sessionTotal;
+        if (sessionTotal > 0) activeSessionsCount++;
+      });
+
+      const className = classMap[s.class_id] || 'Unknown';
+      const sessionMaxSum = activeSubject.max_marks ? activeSubject.max_marks.reduce((a:number, b:number) => a + b, 0) : (activeSubject.papers?.length || 4) * 75;
+      const maxPossible = activeSessionsCount === 0 ? sessionMaxSum : activeSessionsCount * sessionMaxSum;
+      const currentEntry = currentSubjectEntries.find((e: any) => e.session_name === selectedSession) || {};
+
+      return {
+        ...s, className, maxPossible, currentEntry,
+        total: grandTotal,
+        progress: progMap[s.id] || 0,
+        all_entries: currentSubjectEntries,
+        globalRank: 0,
+        classRank: 0
+      };
+    });
+
+    processed.sort((a, b) => b.total - a.total);
+    let gRank = 1;
+    processed.forEach((s, i) => { if (i > 0 && s.total < processed[i - 1].total) gRank = i + 1; s.globalRank = gRank; });
+
+    activeSubject.classes.forEach((cls: string) => {
+      const clsStudents = processed.filter(s => s.className === cls);
+      let cRank = 1;
+      clsStudents.forEach((s, i) => { if (i > 0 && s.total < clsStudents[i - 1].total) cRank = i + 1; s.classRank = cRank; });
+    });
+
+    setStudents(processed);
+  }
+  // --- EVENT HANDLERS ---
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
@@ -139,62 +210,6 @@ export default function Dashboard() {
     localStorage.setItem('school_teacher_auth', JSON.stringify(updatedTeacher));
     await supabase.from('teachers').update({ theme: newThemeKey }).eq('id', teacher.id);
   };
-
-  const sessions = useMemo(() => {
-    if (!activeSubject) return [];
-    const arr = [];
-    for (let y = activeSubject.end_year; y >= activeSubject.start_year; y--) { arr.push(`May/June ${y}`); arr.push(`Oct/Nov ${y}`); }
-    return arr;
-  }, [activeSubject]);
-
-  useEffect(() => { if (activeSubject && selectedSession) fetchClassData(); }, [activeSubject, selectedClass, selectedSession]);
-
-  async function fetchClassData() {
-    if (!activeSubject) return;
-    const { data: classesData } = await supabase.from('classes').select('id, name');
-    const classMap: Record<string, string> = {};
-    classesData?.forEach(c => { classMap[c.id] = c.name; });
-
-    const { data: progData } = await supabase.from('subject_progress').select('student_id, progress').eq('subject_id', activeSubject.id);
-    const progMap: Record<string, number> = {};
-    progData?.forEach((p: any) => { progMap[p.student_id] = p.progress; });
-
-    const { data } = await supabase.from('students').select('id, name, class_id, exam_entries(p1, p2, p3, p4, session_name, subject_id)');
-    const relevantStudents = (data || []).filter(s => activeSubject.classes.includes(classMap[s.class_id]));
-
-    const processed: any[] = relevantStudents.map(s => {
-      let activeSessionsCount = 0;
-      let grandTotal = 0;
-      const currentSubjectEntries = s.exam_entries.filter((e: any) => e.subject_id === activeSubject.id);
-      currentSubjectEntries.forEach((e: any) => {
-        let sessionTotal = 0;
-        activeSubject.papers?.forEach((_: any, i: number) => { sessionTotal += (Number(e[`p${i+1}`]) || 0); });
-        grandTotal += sessionTotal;
-        if (sessionTotal > 0) activeSessionsCount++;
-      });
-      const className = classMap[s.class_id] || 'Unknown';
-      const sessionMaxSum = activeSubject.max_marks ? activeSubject.max_marks.reduce((a:number, b:number) => a + b, 0) : (activeSubject.papers?.length || 4) * 75;
-      const maxPossible = activeSessionsCount === 0 ? sessionMaxSum : activeSessionsCount * sessionMaxSum;
-      const currentEntry = currentSubjectEntries.find((e: any) => e.session_name === selectedSession) || {};
-
-      return {
-        ...s, className, maxPossible, currentEntry,
-        total: grandTotal, progress: progMap[s.id] || 0, all_entries: currentSubjectEntries,
-        globalRank: 0, classRank: 0
-      };
-    });
-
-    processed.sort((a, b) => b.total - a.total);
-    let gRank = 1;
-    processed.forEach((s, i) => { if (i > 0 && s.total < processed[i - 1].total) gRank = i + 1; s.globalRank = gRank; });
-
-    activeSubject.classes.forEach((cls: string) => {
-      const clsStudents = processed.filter(s => s.className === cls);
-      let cRank = 1;
-      clsStudents.forEach((s, i) => { if (i > 0 && s.total < clsStudents[i - 1].total) cRank = i + 1; s.classRank = cRank; });
-    });
-    setStudents(processed);
-  }
 
   const handleSymbolClick = () => { setDialogueBox(UNIVERSAL_QUOTES[Math.floor(Math.random() * UNIVERSAL_QUOTES.length)]); };
 
@@ -231,10 +246,26 @@ export default function Dashboard() {
     await supabase.from('subject_progress').upsert({ student_id: studentId, subject_id: activeSubject.id, progress: newProgress }, { onConflict: 'student_id, subject_id' });
   };
 
+  // --- MEMOS & DERIVED DATA ---
+  const sessions = useMemo(() => {
+    if (!activeSubject) return [];
+    const arr = [];
+    for (let y = activeSubject.end_year; y >= activeSubject.start_year; y--) { arr.push(`May/June ${y}`); arr.push(`Oct/Nov ${y}`); }
+    return arr;
+  }, [activeSubject]);
+
+  useEffect(() => { if (activeSubject && selectedSession) fetchClassData(); }, [activeSubject, selectedClass, selectedSession]);
+
   const displayedStudents = selectedClass === 'All Sections' ? students : students.filter(s => s.className === selectedClass);
   const top10 = displayedStudents.slice(0, 10);
-  const chartData = top10.map(s => ({ name: s.name.split(' ')[0], fullName: s.name, score: s.total }));
 
+  const chartData = top10.map(s => ({
+    name: s.name.split(' ')[0],
+    fullName: s.name,
+    score: s.total
+  }));
+
+  // --- EXCEL EXPORT ---
   const exportToExcel = async () => {
     const workbook = new ExcelJS.Workbook();
     const sheetName = selectedClass === 'All Sections' ? 'Master Leaderboard' : `${selectedClass} - Archive`;
@@ -281,22 +312,29 @@ export default function Dashboard() {
   if (!teacher) {
     const loginTheme = THEMES['emerald'];
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', backgroundColor: loginTheme.bg, padding: '20px' }}>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', backgroundColor: loginTheme.bg }}>
         <FloatingBackground lightColor={loginTheme.lightColor} onSymbolClick={handleSymbolClick} />
         {dialogueBox && (
-          <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', backgroundColor: loginTheme.color, color: 'white', padding: '30px', width: '90%', borderRadius: '16px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', zIndex: 99999, fontWeight: 'bold', fontSize: '20px', textAlign: 'center', maxWidth: '500px', animation: 'popIn 0.3s ease-out forwards' }}>
-            <div style={{ fontSize: '40px', marginBottom: '10px' }}>💡</div>{dialogueBox}
+          <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', backgroundColor: loginTheme.color, color: 'white', padding: '30px 40px', borderRadius: '16px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', zIndex: 99999, fontWeight: 'bold', fontSize: '24px', textAlign: 'center', maxWidth: '600px', animation: 'popIn 0.3s ease-out forwards' }}>
+            <div style={{ fontSize: '40px', marginBottom: '10px' }}>💡</div>
+            {dialogueBox}
             <button onClick={() => setDialogueBox(null)} style={{ display: 'block', margin: '20px auto 0', padding: '10px 25px', backgroundColor: 'white', color: loginTheme.color, border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' }}>Awesome!</button>
           </div>
         )}
-        <div style={{ backgroundColor: 'white', padding: '40px 20px', borderRadius: '24px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.15)', width: '100%', maxWidth: '450px', textAlign: 'center', position: 'relative', zIndex: 10, borderTop: `8px solid ${loginTheme.color}` }}>
-          <img src="/logo.png" alt="Baitussalam Logo" style={{ height: '70px', marginBottom: '20px', objectFit: 'contain' }} />
-          <h1 style={{ color: loginTheme.color, fontSize: '28px', fontWeight: '900', margin: '0 0 5px 0' }}>Faculty Portal</h1>
-          <p style={{ color: '#6b7280', fontSize: '14px', marginBottom: '30px' }}>Enter your credentials to access your dashboard.</p>
+        <div style={{ backgroundColor: 'white', padding: '50px 40px', borderRadius: '24px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.15)', width: '100%', maxWidth: '450px', textAlign: 'center', position: 'relative', zIndex: 10, borderTop: `8px solid ${loginTheme.color}` }}>
+          <img src="/logo.png" alt="Baitussalam Logo" style={{ height: '90px', marginBottom: '25px', objectFit: 'contain' }} />
+          <h1 style={{ color: loginTheme.color, fontSize: '32px', fontWeight: '900', margin: '0 0 5px 0' }}>Faculty Portal</h1>
+          <p style={{ color: '#6b7280', fontSize: '16px', marginBottom: '30px' }}>Enter your credentials to access your dashboard.</p>
           {loginError && <div style={{ backgroundColor: '#fee2e2', color: '#b91c1c', padding: '10px', borderRadius: '8px', marginBottom: '20px', fontWeight: 'bold', fontSize: '14px' }}>{loginError}</div>}
           <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <div style={{ textAlign: 'left' }}><label style={{ display: 'block', fontSize: '14px', fontWeight: 'bold', color: '#374151', marginBottom: '8px' }}>Email Address</label><input type="text" placeholder="teacher@baitussalam.edu" value={email} onChange={e=>setEmail(e.target.value)} style={{ width: '100%', padding: '14px', borderRadius: '10px', border: '2px solid #e5e7eb', fontSize: '16px', outline: 'none', boxSizing: 'border-box' }} onFocus={e => e.target.style.borderColor = loginTheme.color} onBlur={e => e.target.style.borderColor = '#e5e7eb'} required /></div>
-            <div style={{ textAlign: 'left' }}><label style={{ display: 'block', fontSize: '14px', fontWeight: 'bold', color: '#374151', marginBottom: '8px' }}>Password</label><input type="password" placeholder="••••••••" value={password} onChange={e=>setPassword(e.target.value)} style={{ width: '100%', padding: '14px', borderRadius: '10px', border: '2px solid #e5e7eb', fontSize: '16px', outline: 'none', boxSizing: 'border-box' }} onFocus={e => e.target.style.borderColor = loginTheme.color} onBlur={e => e.target.style.borderColor = '#e5e7eb'} required /></div>
+            <div style={{ textAlign: 'left' }}>
+              <label style={{ display: 'block', fontSize: '14px', fontWeight: 'bold', color: '#374151', marginBottom: '8px' }}>Email Address</label>
+              <input type="text" placeholder="teacher@baitussalam.edu" value={email} onChange={e=>setEmail(e.target.value)} style={{ width: '100%', padding: '14px', borderRadius: '10px', border: '2px solid #e5e7eb', fontSize: '16px', outline: 'none', boxSizing: 'border-box' }} onFocus={e => e.target.style.borderColor = loginTheme.color} onBlur={e => e.target.style.borderColor = '#e5e7eb'} required />
+            </div>
+            <div style={{ textAlign: 'left' }}>
+              <label style={{ display: 'block', fontSize: '14px', fontWeight: 'bold', color: '#374151', marginBottom: '8px' }}>Password</label>
+              <input type="password" placeholder="••••••••" value={password} onChange={e=>setPassword(e.target.value)} style={{ width: '100%', padding: '14px', borderRadius: '10px', border: '2px solid #e5e7eb', fontSize: '16px', outline: 'none', boxSizing: 'border-box' }} onFocus={e => e.target.style.borderColor = loginTheme.color} onBlur={e => e.target.style.borderColor = '#e5e7eb'} required />
+            </div>
             <button type="submit" style={{ padding: '16px', backgroundColor: loginTheme.color, color: 'white', fontWeight: 'bold', borderRadius: '10px', fontSize: '18px', cursor: 'pointer', border: 'none', marginTop: '10px' }}>Secure Login</button>
           </form>
         </div>
@@ -313,7 +351,7 @@ export default function Dashboard() {
       return (
         <div style={{ backgroundColor: 'white', padding: '10px', border: `1px solid ${theme.lightColor}`, borderRadius: '8px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
           <p style={{ fontWeight: 'bold', color: theme.color, margin: 0 }}>{payload[0].payload.fullName}</p>
-          <p style={{ color: '#666', margin: '5px 0 0 0', fontSize: '14px' }}>Total Score: <strong style={{ color: '#111827' }}>{payload[0].value}</strong></p>
+          <p style={{ color: '#666', margin: '5px 0 0 0' }}>Total Score: <strong style={{ color: '#111827' }}>{payload[0].value}</strong></p>
         </div>
       );
     }
@@ -321,105 +359,110 @@ export default function Dashboard() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', padding: 'clamp(15px, 3vw, 30px)', fontFamily: 'sans-serif', backgroundColor: theme.bg, transition: 'background 0.5s', position: 'relative' }}>
+    <div style={{ minHeight: '100vh', padding: '30px', fontFamily: 'sans-serif', backgroundColor: theme.bg, transition: 'background 0.5s', position: 'relative' }}>
       <FloatingBackground lightColor={theme.lightColor} onSymbolClick={handleSymbolClick} />
-
       {dialogueBox && (
-        <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', backgroundColor: theme.color, color: 'white', padding: '30px', width: '90%', borderRadius: '16px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', zIndex: 99999, fontWeight: 'bold', fontSize: '20px', textAlign: 'center', maxWidth: '500px', animation: 'popIn 0.3s ease-out forwards', pointerEvents: 'auto' }}>
-          <div style={{ fontSize: '40px', marginBottom: '10px' }}>💡</div>{dialogueBox}
+        <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', backgroundColor: theme.color, color: 'white', padding: '30px 40px', borderRadius: '16px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', zIndex: 99999, fontWeight: 'bold', fontSize: '24px', textAlign: 'center', maxWidth: '600px', animation: 'popIn 0.3s ease-out forwards', pointerEvents: 'auto' }}>
+          <div style={{ fontSize: '40px', marginBottom: '10px' }}>💡</div>
+          {dialogueBox}
           <button onClick={() => setDialogueBox(null)} style={{ display: 'block', margin: '20px auto 0', padding: '10px 25px', backgroundColor: 'white', color: theme.color, border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' }}>Awesome!</button>
         </div>
       )}
 
       <div style={{ position: 'relative', zIndex: 10, pointerEvents: 'none' }}>
 
-        {/* --- RESPONSIVE HEADER: Groups Logo/Title left, User/Theme right --- */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', pointerEvents: 'auto', gap: '20px', backgroundColor: 'white', padding: '20px', borderRadius: '16px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-            <img src="/logo.png" alt="Baitussalam Logo" style={{ height: '60px', objectFit: 'contain' }} />
-            <h1 style={{ color: theme.color, fontSize: 'clamp(24px, 4vw, 36px)', fontWeight: '900', margin: '0' }}>{teacher.name}'s Portal</h1>
+        {/* --- TOP RIGHT LOGOUT & THEME CHANGER --- */}
+        <div style={{ position: 'absolute', top: '0px', right: '0px', textAlign: 'right', pointerEvents: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '15px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+            <h3 style={{ margin: 0, color: theme.color, fontSize: '18px' }}>Welcome, {teacher.name}</h3>
+            <button onClick={handleLogout} style={{ background: 'none', border: 'none', color: '#ef4444', fontWeight: 'bold', cursor: 'pointer', textDecoration: 'underline', padding: 0 }}>Logout Portal</button>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '10px' }}>
-            <div style={{ position: 'relative' }}>
-              <button onClick={() => setShowThemePicker(!showThemePicker)} style={{ padding: '8px 16px', backgroundColor: theme.bg, color: theme.color, border: `2px solid ${theme.color}`, borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                🎨 Theme <span style={{ fontSize: '10px' }}>▼</span>
-              </button>
-              {showThemePicker && (
-                <div style={{ position: 'absolute', top: '120%', right: 0, backgroundColor: 'white', padding: '15px', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', width: '220px', zIndex: 100, display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', border: `1px solid #e5e7eb` }}>
-                  {THEME_KEYS.map((tk) => (<button key={tk} onClick={() => { handleThemeChange(tk); setShowThemePicker(false); }} title={`Change theme to ${tk}`} style={{ width: '30px', height: '30px', borderRadius: '50%', backgroundColor: THEMES[tk].color, cursor: 'pointer', border: theme.key === tk ? '3px solid #111827' : '2px solid transparent', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' }} />))}
-                </div>
-              )}
-            </div>
-            <button onClick={handleLogout} style={{ background: 'none', border: 'none', color: '#ef4444', fontWeight: 'bold', cursor: 'pointer', textDecoration: 'underline', padding: 0, fontSize: '14px' }}>Logout</button>
-          </div>
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setShowThemePicker(!showThemePicker)}
+              style={{ padding: '8px 16px', backgroundColor: 'white', color: theme.color, border: `2px solid ${theme.color}`, borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 2px 5px rgba(0,0,0,0.05)' }}
+            >
+              🎨 Theme <span style={{ fontSize: '10px' }}>▼</span>
+            </button>
 
+            {showThemePicker && (
+              <div style={{ position: 'absolute', top: '120%', right: 0, backgroundColor: 'white', padding: '15px', borderRadius: '12px', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', width: '220px', zIndex: 100, display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', border: `1px solid #e5e7eb` }}>
+                {THEME_KEYS.map((tk) => (
+                  <button
+                    key={tk}
+                    onClick={() => { handleThemeChange(tk); setShowThemePicker(false); }}
+                    title={`Change theme to ${tk}`}
+                    style={{
+                      width: '30px', height: '30px', borderRadius: '50%', backgroundColor: THEMES[tk].color, cursor: 'pointer',
+                      border: theme.key === tk ? '3px solid #111827' : '2px solid transparent',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)', transition: 'transform 0.2s'
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.transform = 'scale(1.1)'}
+                    onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* --- CONTROLS AREA --- */}
-        <div style={{ pointerEvents: 'auto', display: 'flex', flexWrap: 'wrap', gap: '15px', justifyContent: 'center', marginBottom: '30px', backgroundColor: 'white', padding: '20px', borderRadius: '16px', boxShadow: '0 4px 6px rgba(0,0,0,0.05)' }}>
-          <select value={activeSubject?.id || ''} onChange={(e) => setActiveSubject(subjects.find(s => s.id === e.target.value))} style={{ padding: '12px 20px', borderRadius: '10px', border: `2px solid ${theme.color}`, fontWeight: 'bold', fontSize: '16px', outline: 'none', cursor: 'pointer', flex: '1 1 200px' }}>
-            {subjects.length === 0 && <option>No Subjects Yet</option>}
-            {subjects.map(sub => <option key={sub.id} value={sub.id}>{sub.name} ({sub.start_year}-{sub.end_year})</option>)}
-          </select>
-
-          {activeSubject && (
-            <select value={selectedSession} onChange={(e) => setSelectedSession(e.target.value)} style={{ padding: '12px 20px', borderRadius: '10px', border: `2px solid ${theme.lightColor}`, fontWeight: 'bold', outline: 'none', cursor: 'pointer', flex: '1 1 150px' }}>
-              {sessions.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          )}
-
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
-            <button onClick={openAddSubject} style={{ backgroundColor: '#f59e0b', color: 'white', padding: '12px 20px', borderRadius: '10px', border: 'none', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto', whiteSpace: 'nowrap' }}>+ Add Subject</button>
-            <button onClick={exportToExcel} style={{ backgroundColor: '#4f46e5', color: 'white', padding: '12px 20px', borderRadius: '10px', border: 'none', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto', whiteSpace: 'nowrap' }}>📊 Export Data</button>
-            {activeSubject && <button onClick={handleDeleteSubject} style={{ backgroundColor: '#ef4444', color: 'white', padding: '12px 20px', borderRadius: '10px', border: 'none', fontWeight: 'bold', cursor: 'pointer', flex: '1 1 auto', whiteSpace: 'nowrap' }}>🗑️ Delete Subject</button>}
+        <div style={{ textAlign: 'center', marginBottom: '30px', pointerEvents: 'auto' }}>
+          <img src="/logo.png" alt="Baitussalam Logo" style={{ height: '140px', marginBottom: '15px', objectFit: 'contain' }} />
+          <h1 style={{ color: theme.color, fontSize: '42px', fontWeight: '900', margin: '0' }}>{teacher.name}'s Portal</h1>
+          <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center', gap: '15px', alignItems: 'center' }}>
+            <select value={activeSubject?.id || ''} onChange={(e) => setActiveSubject(subjects.find(s => s.id === e.target.value))} style={{ padding: '10px 20px', borderRadius: '10px', border: `2px solid ${theme.color}`, fontWeight: 'bold', fontSize: '18px', outline: 'none', cursor: 'pointer' }}>{subjects.length === 0 && <option>No Subjects Yet</option>}{subjects.map(sub => <option key={sub.id} value={sub.id}>{sub.name} ({sub.start_year}-{sub.end_year})</option>)}</select>
+            <button onClick={openAddSubject} style={{ backgroundColor: '#f59e0b', color: 'white', padding: '12px 20px', borderRadius: '10px', border: 'none', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 4px 6px rgba(245, 158, 11, 0.3)' }}>+ Add Subject</button>
+            <button onClick={exportToExcel} style={{ backgroundColor: '#4f46e5', color: 'white', padding: '12px 20px', borderRadius: '10px', border: 'none', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 4px 6px rgba(79, 70, 229, 0.3)' }}>📊 Export Data</button>
+            {activeSubject && <button onClick={handleDeleteSubject} style={{ backgroundColor: '#ef4444', color: 'white', padding: '12px 20px', borderRadius: '10px', border: 'none', fontWeight: 'bold', cursor: 'pointer', boxShadow: '0 4px 6px rgba(239, 68, 68, 0.3)' }}>🗑️ Delete Subject</button>}
           </div>
+          {activeSubject && (<div style={{ marginTop: '15px' }}><label style={{ fontWeight: 'bold', marginRight: '10px', color: theme.color }}>Editing Session:</label><select value={selectedSession} onChange={(e) => setSelectedSession(e.target.value)} style={{ padding: '8px', borderRadius: '6px', border: `2px solid ${theme.lightColor}`, fontWeight: 'bold', outline: 'none' }}>{sessions.map(s => <option key={s} value={s}>{s}</option>)}</select></div>)}
         </div>
 
         {activeSubject && (
           <>
-            {/* CLASS TABS */}
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap', marginBottom: '30px', pointerEvents: 'auto' }}>
-              {['All Sections', ...activeSubject.classes].map((cls) => (<button key={cls} onClick={() => setSelectedClass(cls)} style={{ padding: '10px 25px', borderRadius: '8px', border: `2px solid ${theme.color}`, backgroundColor: selectedClass === cls ? theme.color : 'white', color: selectedClass === cls ? 'white' : theme.color, fontWeight: 'bold', fontSize: '16px', cursor: 'pointer', transition: 'all 0.2s', flex: '1 1 auto', maxWidth: '200px' }}>{cls}</button>))}
+            <div style={{ display: 'flex', gap: '15px', justifyContent: 'center', marginBottom: '40px', pointerEvents: 'auto' }}>
+              {['All Sections', ...activeSubject.classes].map((cls) => (<button key={cls} onClick={() => setSelectedClass(cls)} style={{ padding: '12px 35px', borderRadius: '8px', border: `2px solid ${theme.color}`, backgroundColor: selectedClass === cls ? theme.color : 'white', color: selectedClass === cls ? 'white' : theme.color, fontWeight: 'bold', fontSize: '18px', cursor: 'pointer', transition: 'all 0.2s', boxShadow: selectedClass === cls ? `0 4px 10px ${theme.color}40` : 'none' }}>{cls}</button>))}
             </div>
 
             {/* --- CHART SECTION --- */}
             {top10.length > 0 && (
-              <div style={{ maxWidth: '1200px', margin: '0 auto 30px auto', backgroundColor: 'white', padding: '20px', borderRadius: '16px', boxShadow: '0 10px 25px rgba(0,0,0,0.05)', pointerEvents: 'auto' }}>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '15px', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                  <h2 style={{ margin: 0, color: theme.color, fontSize: '20px' }}>Top Performers: {selectedClass}</h2>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button onClick={() => setChartType('bar')} title="Bar Chart" style={{ padding: '8px 12px', borderRadius: '6px', border: chartType === 'bar' ? `2px solid ${theme.color}` : '1px solid #e5e7eb', backgroundColor: chartType === 'bar' ? theme.bg : 'white', cursor: 'pointer' }}>📊</button>
-                    <button onClick={() => setChartType('line')} title="Line Chart" style={{ padding: '8px 12px', borderRadius: '6px', border: chartType === 'line' ? `2px solid ${theme.color}` : '1px solid #e5e7eb', backgroundColor: chartType === 'line' ? theme.bg : 'white', cursor: 'pointer' }}>📈</button>
-                    <button onClick={() => setChartType('pie')} title="Pie Chart" style={{ padding: '8px 12px', borderRadius: '6px', border: chartType === 'pie' ? `2px solid ${theme.color}` : '1px solid #e5e7eb', backgroundColor: chartType === 'pie' ? theme.bg : 'white', cursor: 'pointer' }}>🥧</button>
+              <div style={{ maxWidth: '1200px', margin: '0 auto 40px auto', backgroundColor: 'white', padding: '30px', borderRadius: '16px', boxShadow: '0 10px 25px rgba(0,0,0,0.05)', pointerEvents: 'auto' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                  <h2 style={{ margin: 0, color: theme.color }}>Top Performers: {selectedClass}</h2>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button onClick={() => setChartType('bar')} title="Bar Chart" style={{ padding: '8px', borderRadius: '6px', border: chartType === 'bar' ? `2px solid ${theme.color}` : '1px solid #e5e7eb', backgroundColor: chartType === 'bar' ? theme.bg : 'white', cursor: 'pointer', color: theme.color }}>📊</button>
+                    <button onClick={() => setChartType('line')} title="Line Chart" style={{ padding: '8px', borderRadius: '6px', border: chartType === 'line' ? `2px solid ${theme.color}` : '1px solid #e5e7eb', backgroundColor: chartType === 'line' ? theme.bg : 'white', cursor: 'pointer', color: theme.color }}>📈</button>
+                    <button onClick={() => setChartType('pie')} title="Pie Chart" style={{ padding: '8px', borderRadius: '6px', border: chartType === 'pie' ? `2px solid ${theme.color}` : '1px solid #e5e7eb', backgroundColor: chartType === 'pie' ? theme.bg : 'white', cursor: 'pointer', color: theme.color }}>🥧</button>
                   </div>
                 </div>
 
-                <div style={{ height: '300px', width: '100%', minWidth: '250px' }}>
+                <div style={{ height: '350px', width: '100%' }}>
                   <ResponsiveContainer>
                     {chartType === 'bar' ? (
-                      <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <BarChart data={chartData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                        <XAxis dataKey="name" tick={{ fill: theme.color, fontSize: 12 }} axisLine={false} tickLine={false} />
-                        <YAxis tick={{ fill: theme.color, fontSize: 12 }} axisLine={false} tickLine={false} />
+                        <XAxis dataKey="name" tick={{ fill: theme.color }} axisLine={false} tickLine={false} />
+                        <YAxis tick={{ fill: theme.color }} axisLine={false} tickLine={false} />
                         <Tooltip content={<CustomTooltip />} cursor={{ fill: theme.bg }} />
                         <Bar dataKey="score" fill={theme.lightColor} radius={[4, 4, 0, 0]} animationDuration={1000} />
                       </BarChart>
                     ) : chartType === 'line' ? (
-                      <LineChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                        <XAxis dataKey="name" tick={{ fill: theme.color, fontSize: 12 }} axisLine={false} tickLine={false} />
-                        <YAxis tick={{ fill: theme.color, fontSize: 12 }} axisLine={false} tickLine={false} domain={[0, 'dataMax + 50']} />
+                        <XAxis dataKey="name" tick={{ fill: theme.color }} axisLine={false} tickLine={false} />
+                        <YAxis tick={{ fill: theme.color }} axisLine={false} tickLine={false} domain={[0, 'dataMax + 50']} />
                         <Tooltip content={<CustomTooltip />} />
-                        <Line type="monotone" dataKey="score" stroke={theme.color} strokeWidth={3} dot={{ fill: theme.color, r: 4 }} activeDot={{ r: 6 }} animationDuration={1000} />
+                        <Line type="monotone" dataKey="score" stroke={theme.color} strokeWidth={3} dot={{ fill: theme.color, r: 6 }} activeDot={{ r: 8 }} animationDuration={1000} />
                       </LineChart>
                     ) : (
                       <PieChart>
                          <Tooltip content={<CustomTooltip />} />
-                         <Legend wrapperStyle={{ paddingTop: '10px', fontSize: '12px' }} formatter={(value, entry: any) => <span style={{ color: '#374151', fontWeight: 'bold' }}>{entry.payload.fullName}</span>} />
-                        <Pie data={chartData} cx="50%" cy="50%" innerRadius={40} outerRadius={80} paddingAngle={5} dataKey="score" animationDuration={1000}>
-                          {chartData.map((entry, index) => <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />)}
+                         <Legend wrapperStyle={{ paddingTop: '20px' }} formatter={(value, entry: any) => <span style={{ color: theme.color, fontWeight: 'bold' }}>{entry.payload.fullName}</span>} />
+                        <Pie data={chartData} cx="50%" cy="50%" innerRadius={60} outerRadius={100} paddingAngle={5} dataKey="score" animationDuration={1000}>
+                          {chartData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                          ))}
                         </Pie>
                       </PieChart>
                     )}
@@ -428,56 +471,53 @@ export default function Dashboard() {
               </div>
             )}
 
-            {/* --- MAIN TABLE (WITH HORIZONTAL SCROLL) --- */}
             <div style={{ maxWidth: '1200px', margin: '0 auto', backgroundColor: 'white', borderRadius: '16px', boxShadow: '0 10px 30px rgba(0,0,0,0.1)', overflow: 'hidden', pointerEvents: 'auto' }}>
-              <div style={{ overflowX: 'auto', width: '100%' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '800px' }}>
-                  <thead>
-                    <tr style={{ backgroundColor: theme.color, color: 'white' }}>
-                      <th style={{ padding: '15px 20px', whiteSpace: 'nowrap' }}>Rank</th>
-                      <th style={{ padding: '15px 20px', whiteSpace: 'nowrap' }}>Student Name</th>
-                      {activeSubject.papers?.map((pName: string, i: number) => (<th key={i} style={{ padding: '15px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>{pName} <br/><span style={{ fontSize: '11px', fontWeight: 'normal', opacity: 0.8 }}>Max: {activeSubject.max_marks?.[i] || 75}</span></th>))}
-                      <th style={{ padding: '15px 20px', textAlign: 'right', whiteSpace: 'nowrap' }}>Total Score</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {displayedStudents.map((student) => {
-                      const rank = selectedClass === 'All Sections' ? student.globalRank : student.classRank;
-                      return (
-                        <tr key={student.id} style={{ borderBottom: '1px solid #f3f4f6', backgroundColor: 'white', transition: 'all 0.2s ease' }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme.bg} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'white'}>
-                          <td style={{ padding: '15px 20px', fontWeight: 'bold', color: theme.lightColor, fontSize: '18px' }}><Crown rank={rank} themeColor={theme.color} /> #{rank}</td>
-                          <td style={{ padding: '15px 20px', fontWeight: 'bold', fontSize: '16px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <button onClick={() => setSelectedStudent(student)} style={{ background: 'none', border: 'none', color: theme.color, textDecoration: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold', padding: 0, whiteSpace: 'nowrap' }}>{student.name}</button>
-                              {selectedClass === 'All Sections' && <span style={{ fontSize: '11px', backgroundColor: '#e5e7eb', padding: '2px 6px', borderRadius: '12px', color: '#4b5563', whiteSpace: 'nowrap' }}>{student.className}</span>}
-                              <button onClick={() => handleDeleteStudent(student.id, student.name)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', opacity: 0.5, marginLeft: '5px' }} title={`Delete ${student.name}`}>🗑️</button>
-                            </div>
-                          </td>
-                          {activeSubject.papers?.map((_: any, i: number) => {
-                            const maxM = activeSubject.max_marks ? activeSubject.max_marks[i] : 75;
-                            return (<td key={i} style={{ padding: '10px', textAlign: 'center' }}><MarkInput studentId={student.id} session={selectedSession} subjectId={activeSubject.id} paper={`p${i+1}`} maxMark={maxM} initialValue={student.currentEntry[`p${i+1}`]} themeColor={theme.color} onUpdate={fetchClassData} /></td>);
-                          })}
-                          <td style={{ padding: '15px 20px', textAlign: 'right' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: '120px' }}>
-                              <span style={{ fontWeight: '900', fontSize: '18px', color: '#111827' }}><span style={{ color: theme.color }}>{student.total}</span> <span style={{ fontSize: '12px', color: '#6b7280' }}>/ {student.maxPossible}</span></span>
-                              <div style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '8px', marginTop: '5px' }}><span style={{ fontSize: '11px', color: '#6b7280', fontWeight: 'bold' }}>Prog:</span><div style={{ flex: 1, backgroundColor: '#e5e7eb', height: '6px', borderRadius: '3px', overflow: 'hidden' }}><div style={{ width: `${student.progress}%`, backgroundColor: theme.color, height: '100%' }}></div></div><span style={{ fontSize: '12px', fontWeight: 'bold', minWidth: '30px' }}>{student.progress}%</span></div>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              {selectedClass !== 'All Sections' && (<div style={{ padding: '20px', backgroundColor: '#f9fafb', borderTop: '2px solid #e5e7eb', pointerEvents: 'auto' }}><AddStudent classId={selectedClass} onAdded={fetchClassData} /></div>)}
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ backgroundColor: theme.color, color: 'white' }}>
+                    <th style={{ padding: '20px' }}>Rank</th>
+                    <th style={{ padding: '20px' }}>Student Name</th>
+                    {activeSubject.papers?.map((pName: string, i: number) => (<th key={i} style={{ padding: '20px', textAlign: 'center' }}>{pName} <br/><span style={{ fontSize: '12px', fontWeight: 'normal', opacity: 0.8 }}>Max: {activeSubject.max_marks?.[i] || 75}</span></th>))}
+                    <th style={{ padding: '20px', textAlign: 'right' }}>Total (Obtained / Max)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayedStudents.map((student) => {
+                    const rank = selectedClass === 'All Sections' ? student.globalRank : student.classRank;
+                    return (
+                      <tr key={student.id} style={{ borderBottom: '1px solid #f3f4f6', backgroundColor: 'white', transition: 'all 0.2s ease' }} onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme.bg} onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'white'}>
+                        <td style={{ padding: '20px', fontWeight: 'bold', color: theme.lightColor, fontSize: '22px' }}><Crown rank={rank} themeColor={theme.color} /> #{rank}</td>
+                        <td style={{ padding: '20px', fontWeight: 'bold', fontSize: '18px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <button onClick={() => setSelectedStudent(student)} style={{ background: 'none', border: 'none', color: theme.color, textDecoration: 'none', cursor: 'pointer', fontSize: '18px', fontWeight: 'bold', padding: 0 }}>{student.name}</button>
+                            {selectedClass === 'All Sections' && <span style={{ fontSize: '12px', backgroundColor: '#e5e7eb', padding: '2px 8px', borderRadius: '12px', color: '#4b5563' }}>{student.className}</span>}
+                            <button onClick={() => handleDeleteStudent(student.id, student.name)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', opacity: 0.5, marginLeft: '5px' }} title={`Delete ${student.name}`}>🗑️</button>
+                          </div>
+                        </td>
+                        {activeSubject.papers?.map((_: any, i: number) => {
+                          const maxM = activeSubject.max_marks ? activeSubject.max_marks[i] : 75;
+                          return (<td key={i} style={{ padding: '20px', textAlign: 'center' }}><MarkInput studentId={student.id} session={selectedSession} subjectId={activeSubject.id} paper={`p${i+1}`} maxMark={maxM} initialValue={student.currentEntry[`p${i+1}`]} themeColor={theme.color} onUpdate={fetchClassData} /></td>);
+                        })}
+                        <td style={{ padding: '20px', textAlign: 'right' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                            <span style={{ fontWeight: '900', fontSize: '20px', color: '#111827' }}><span style={{ color: theme.color }}>{student.total}</span> <span style={{ fontSize: '14px', color: '#6b7280' }}>/ {student.maxPossible}</span></span>
+                            <div style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '10px', marginTop: '5px' }}><span style={{ fontSize: '12px', color: '#6b7280', fontWeight: 'bold' }}>Prog:</span><div style={{ flex: 1, backgroundColor: '#e5e7eb', height: '8px', borderRadius: '4px', overflow: 'hidden' }}><div style={{ width: `${student.progress}%`, backgroundColor: theme.color, height: '100%' }}></div></div><span style={{ fontSize: '14px', fontWeight: 'bold', minWidth: '35px' }}>{student.progress}%</span></div>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              {selectedClass !== 'All Sections' && (<div style={{ padding: '30px', backgroundColor: '#f9fafb', borderTop: '2px solid #e5e7eb', pointerEvents: 'auto' }}><AddStudent classId={selectedClass} onAdded={fetchClassData} /></div>)}
             </div>
           </>
         )}
       </div>
 
       {showAddSubject && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 99999, pointerEvents: 'auto', padding: '15px' }}>
-          <div style={{ backgroundColor: 'white', padding: '30px', borderRadius: '16px', width: '100%', maxWidth: '450px', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)' }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 99999, pointerEvents: 'auto' }}>
+          <div style={{ backgroundColor: 'white', padding: '30px', borderRadius: '16px', width: '450px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)' }}>
             <h2 style={{ color: theme.color, margin: '0 0 20px 0', fontSize: '24px' }}>Create New Subject</h2>
             <p style={{ fontWeight: 'bold', marginBottom: '8px', color: '#374151' }}>Subject Name:</p><input placeholder="e.g. A-Level Math" value={newSubName} onChange={e=>setNewSubName(e.target.value)} style={{ width: '100%', padding: '12px', marginBottom: '15px', borderRadius: '8px', border: '2px solid #e5e7eb', outline: 'none', boxSizing: 'border-box' }} />
             <p style={{ fontWeight: 'bold', marginBottom: '8px', color: '#374151' }}>Custom Papers (Comma Separated):</p><input placeholder="e.g. P1, M1, P2, S1" value={newSubPapersStr} onChange={e=>setNewSubPapersStr(e.target.value)} style={{ width: '100%', padding: '12px', marginBottom: '15px', borderRadius: '8px', border: '2px solid #e5e7eb', outline: 'none', boxSizing: 'border-box' }} />
@@ -490,22 +530,20 @@ export default function Dashboard() {
       )}
 
       {selectedStudent && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(17, 24, 39, 0.75)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 99999, padding: '15px', pointerEvents: 'auto' }}>
-          <div style={{ backgroundColor: 'white', borderRadius: '16px', width: '100%', maxWidth: '1000px', maxHeight: '95vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)' }}>
-            <div style={{ padding: '20px', backgroundColor: theme.color, color: 'white', display: 'flex', flexWrap: 'wrap', gap: '15px', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div><h2 style={{ margin: 0, fontSize: '24px', fontWeight: '900' }}>{selectedStudent.name}</h2><p style={{ margin: '5px 0 0 0', color: theme.bg, fontSize: '14px', fontWeight: 'bold' }}>Class {selectedStudent.className} | {selectedClass === 'All Sections' ? 'Global Rank' : 'Class Rank'}: #{selectedClass === 'All Sections' ? selectedStudent.globalRank : selectedStudent.classRank}</p></div>
-              <div style={{ textAlign: 'right' }}><h3 style={{ margin: '0 0 10px 0', fontSize: '16px' }}>Instructor: {teacher.name}</h3><button onClick={() => setSelectedStudent(null)} style={{ backgroundColor: 'rgba(255,255,255,0.2)', border: '1px solid white', color: 'white', padding: '6px 16px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px', transition: 'background 0.2s' }}>Close ✕</button></div>
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(17, 24, 39, 0.75)', backdropFilter: 'blur(4px)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 99999, padding: '20px', pointerEvents: 'auto' }}>
+          <div style={{ backgroundColor: 'white', borderRadius: '16px', width: '100%', maxWidth: '1000px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)' }}>
+            <div style={{ padding: '25px 30px', backgroundColor: theme.color, color: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div><h2 style={{ margin: 0, fontSize: '32px', fontWeight: '900' }}>{selectedStudent.name}</h2><p style={{ margin: '5px 0 0 0', color: theme.bg, fontSize: '16px', fontWeight: 'bold' }}>Class {selectedStudent.className} | {selectedClass === 'All Sections' ? 'Global Rank' : 'Class Rank'}: #{selectedClass === 'All Sections' ? selectedStudent.globalRank : selectedStudent.classRank}</p></div>
+              <div style={{ textAlign: 'right' }}><h3 style={{ margin: '0 0 10px 0', fontSize: '20px' }}>Instructor: {teacher.name}</h3><button onClick={() => setSelectedStudent(null)} style={{ backgroundColor: 'rgba(255,255,255,0.2)', border: '1px solid white', color: 'white', padding: '8px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px', transition: 'background 0.2s' }}>Close ✕</button></div>
             </div>
-            <div style={{ padding: '20px', backgroundColor: '#f0fdf4', borderBottom: '2px solid #d1d5db', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '15px' }}><strong style={{ fontSize: '16px', color: theme.color }}>Progress Report:</strong><input type="range" min="0" max="100" value={selectedStudent.progress} onChange={(e) => handleProgressChange(selectedStudent.id, Number(e.target.value))} style={{ flex: 1, minWidth: '150px', cursor: 'pointer', accentColor: theme.color }} /><span style={{ fontSize: '24px', fontWeight: '900', color: theme.color, minWidth: '60px', textAlign: 'right' }}>{selectedStudent.progress}%</span></div>
-            <div style={{ overflowY: 'auto', flex: 1, padding: '20px' }}>
-              <div style={{ overflowX: 'auto', width: '100%' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', minWidth: '600px' }}>
-                  <thead><tr style={{ backgroundColor: '#e5e7eb', color: '#374151' }}><th style={{ padding: '12px', textAlign: 'left', border: '1px solid #d1d5db', fontWeight: 'bold' }}>Exam Session</th>{activeSubject.papers?.map((pName: string, i: number) => <th key={i} style={{ padding: '12px', border: '1px solid #d1d5db', fontWeight: 'bold' }}>{pName}</th>)}</tr></thead>
-                  <tbody>{sessions.map(session => { const entry = selectedStudent.all_entries?.find((e: any) => e.session_name === session) || {}; let hasMarks = false; activeSubject.papers?.forEach((_: any, i: number) => { if (entry[`p${i+1}`] > 0) hasMarks = true; }); return (<tr key={session} style={{ backgroundColor: hasMarks ? theme.bg : 'white' }}><td style={{ padding: '12px', textAlign: 'left', border: '1px solid #d1d5db', fontWeight: hasMarks ? 'bold' : 'normal', color: hasMarks ? theme.color : 'black' }}>{session}</td>{activeSubject.papers?.map((_: any, i: number) => { const maxM = activeSubject.max_marks ? activeSubject.max_marks[i] : 75; return (<td key={i} style={{ padding: '8px', border: '1px solid #d1d5db' }}><MarkInput studentId={selectedStudent.id} session={session} subjectId={activeSubject.id} paper={`p${i+1}`} maxMark={maxM} initialValue={entry[`p${i+1}`]} themeColor={theme.color} onUpdate={fetchClassData} /></td>); })}</tr>); })}</tbody>
-                </table>
-              </div>
+            <div style={{ padding: '25px 30px', backgroundColor: '#f0fdf4', borderBottom: '2px solid #d1d5db', display: 'flex', alignItems: 'center', gap: '20px' }}><strong style={{ fontSize: '20px', color: theme.color }}>Student's Progress Report:</strong><input type="range" min="0" max="100" value={selectedStudent.progress} onChange={(e) => handleProgressChange(selectedStudent.id, Number(e.target.value))} style={{ flex: 1, cursor: 'pointer', accentColor: theme.color }} /><span style={{ fontSize: '28px', fontWeight: '900', color: theme.color, minWidth: '70px', textAlign: 'right' }}>{selectedStudent.progress}%</span></div>
+            <div style={{ overflowY: 'auto', flex: 1, padding: '30px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center' }}>
+                <thead><tr style={{ backgroundColor: '#e5e7eb', color: '#374151' }}><th style={{ padding: '15px', textAlign: 'left', border: '1px solid #d1d5db', fontWeight: 'bold' }}>Exam Session</th>{activeSubject.papers?.map((pName: string, i: number) => <th key={i} style={{ padding: '15px', border: '1px solid #d1d5db', fontWeight: 'bold' }}>{pName}</th>)}</tr></thead>
+                <tbody>{sessions.map(session => { const entry = selectedStudent.all_entries?.find((e: any) => e.session_name === session) || {}; let hasMarks = false; activeSubject.papers?.forEach((_: any, i: number) => { if (entry[`p${i+1}`] > 0) hasMarks = true; }); return (<tr key={session} style={{ backgroundColor: hasMarks ? theme.bg : 'white' }}><td style={{ padding: '15px', textAlign: 'left', border: '1px solid #d1d5db', fontWeight: hasMarks ? 'bold' : 'normal', color: hasMarks ? theme.color : 'black' }}>{session}</td>{activeSubject.papers?.map((_: any, i: number) => { const maxM = activeSubject.max_marks ? activeSubject.max_marks[i] : 75; return (<td key={i} style={{ padding: '10px', border: '1px solid #d1d5db' }}><MarkInput studentId={selectedStudent.id} session={session} subjectId={activeSubject.id} paper={`p${i+1}`} maxMark={maxM} initialValue={entry[`p${i+1}`]} themeColor={theme.color} onUpdate={fetchClassData} /></td>); })}</tr>); })}</tbody>
+              </table>
             </div>
-            <div style={{ padding: '15px 20px', backgroundColor: '#f9fafb', borderTop: '2px solid #e5e7eb', textAlign: 'right' }}><button onClick={() => handleDeleteStudent(selectedStudent.id, selectedStudent.name)} style={{ backgroundColor: '#ef4444', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '14px', boxShadow: '0 4px 6px rgba(239, 68, 68, 0.2)' }}>🗑️ Delete Student</button></div>
+            <div style={{ padding: '20px 30px', backgroundColor: '#f9fafb', borderTop: '2px solid #e5e7eb', textAlign: 'right' }}><button onClick={() => handleDeleteStudent(selectedStudent.id, selectedStudent.name)} style={{ backgroundColor: '#ef4444', color: 'white', border: 'none', padding: '12px 25px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px', boxShadow: '0 4px 6px rgba(239, 68, 68, 0.2)' }}>🗑️ Delete Student Record</button></div>
           </div>
         </div>
       )}
