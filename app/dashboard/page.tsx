@@ -121,7 +121,6 @@ export default function Dashboard() {
 
   // --- DATA FETCHING ---
 
-  // RE-ADDED MISSING fetchSubjects FUNCTION
   async function fetchSubjects(tId: string) {
     const { data } = await supabase.from('subjects').select('*').eq('teacher_id', tId);
     if (data && data.length > 0) {
@@ -145,7 +144,12 @@ export default function Dashboard() {
     const progMap: Record<string, number> = {};
     progData?.forEach((p: any) => { progMap[p.student_id] = p.progress; });
 
-    const { data } = await supabase.from('students').select('id, name, class_id, exam_entries(p1, p2, p3, p4, session_name, subject_id)');
+    // FIX: Filtering the student fetch by subject_id ensures isolated databases per subject/teacher
+    const { data } = await supabase
+      .from('students')
+      .select('id, name, class_id, exam_entries(p1, p2, p3, p4, session_name, subject_id)')
+      .eq('subject_id', activeSubject.id);
+
     const relevantStudents = (data || []).filter(s => activeSubject.classes.includes(classMap[s.class_id]));
 
     const processed: any[] = relevantStudents.map(s => {
@@ -188,6 +192,7 @@ export default function Dashboard() {
 
     setStudents(processed);
   }
+
   // --- EVENT HANDLERS ---
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -308,19 +313,80 @@ export default function Dashboard() {
     saveAs(new Blob([buffer]), `${teacher.name}_${activeSubject.name}.xlsx`);
   };
 
+  // --- IMPORT EXCEL LOGIC FIX ---
+  const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeSubject || selectedClass === 'All Sections') return;
+
+    try {
+      // 1. We must fetch the actual class_id mapping for the selectedClass string
+      const { data: classData, error: classError } = await supabase
+        .from('classes')
+        .select('id')
+        .eq('name', selectedClass)
+        .single();
+
+      if (classError || !classData) {
+        alert(`Error finding database ID for class: ${selectedClass}.`);
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        try {
+          const buffer = event.target?.result as ArrayBuffer;
+          const workbook = new ExcelJS.Workbook();
+          await workbook.xlsx.load(buffer);
+          const sheet = workbook.worksheets[0];
+          const studentsToInsert: any[] = [];
+
+          sheet.eachRow((row, rowNumber) => {
+            // Assume Row 1 is a header, data starts at Row 2. Column 1 is Name.
+            if (rowNumber > 1) {
+              const nameValue = row.getCell(1).text?.trim();
+              if (nameValue && nameValue !== '') {
+                studentsToInsert.push({
+                  name: nameValue,
+                  subject_id: activeSubject.id,
+                  class_id: classData.id
+                });
+              }
+            }
+          });
+
+          if (studentsToInsert.length > 0) {
+            const { error } = await supabase.from('students').insert(studentsToInsert);
+            if (error) {
+              console.error(error);
+              alert("Database Error: Failed to import students.");
+            } else {
+              alert(`Successfully imported ${studentsToInsert.length} students to ${selectedClass}!`);
+              fetchClassData(); // Refresh table
+            }
+          } else {
+            alert("No students found. Ensure names are in the first column and row 1 is a header.");
+          }
+        } catch (err) {
+          console.error(err);
+          alert("Failed to parse the Excel file.");
+        }
+
+        // Reset file input so user can re-import if necessary
+        e.target.value = '';
+      };
+      reader.readAsArrayBuffer(file);
+    } catch (err) {
+      console.error(err);
+      alert("An unexpected error occurred during import.");
+    }
+  };
+
   // ================= RENDER: LOGIN =================
   if (!teacher) {
     const loginTheme = THEMES['emerald'];
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', backgroundColor: loginTheme.bg }}>
         <FloatingBackground lightColor={loginTheme.lightColor} onSymbolClick={handleSymbolClick} />
-        {dialogueBox && (
-          <div style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', backgroundColor: loginTheme.color, color: 'white', padding: '30px 40px', borderRadius: '16px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', zIndex: 99999, fontWeight: 'bold', fontSize: '24px', textAlign: 'center', maxWidth: '600px', animation: 'popIn 0.3s ease-out forwards' }}>
-            <div style={{ fontSize: '40px', marginBottom: '10px' }}>💡</div>
-            {dialogueBox}
-            <button onClick={() => setDialogueBox(null)} style={{ display: 'block', margin: '20px auto 0', padding: '10px 25px', backgroundColor: 'white', color: loginTheme.color, border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' }}>Awesome!</button>
-          </div>
-        )}
         <div style={{ backgroundColor: 'white', padding: '50px 40px', borderRadius: '24px', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.15)', width: '100%', maxWidth: '450px', textAlign: 'center', position: 'relative', zIndex: 10, borderTop: `8px solid ${loginTheme.color}` }}>
           <img src="/logo.png" alt="Baitussalam Logo" style={{ height: '90px', marginBottom: '25px', objectFit: 'contain' }} />
           <h1 style={{ color: loginTheme.color, fontSize: '32px', fontWeight: '900', margin: '0 0 5px 0' }}>Faculty Portal</h1>
@@ -509,7 +575,21 @@ export default function Dashboard() {
                   })}
                 </tbody>
               </table>
-              {selectedClass !== 'All Sections' && (<div style={{ padding: '30px', backgroundColor: '#f9fafb', borderTop: '2px solid #e5e7eb', pointerEvents: 'auto' }}><AddStudent classId={selectedClass} onAdded={fetchClassData} /></div>)}
+              {selectedClass !== 'All Sections' && (
+                <div style={{ padding: '30px', backgroundColor: '#f9fafb', borderTop: '2px solid #e5e7eb', pointerEvents: 'auto', display: 'flex', gap: '20px', alignItems: 'center' }}>
+                  <AddStudent
+                     classId={selectedClass}
+                     subjectId={activeSubject.id}
+                     onAdded={fetchClassData}
+                     customText="Add Student"
+                     buttonStyle={{ background: 'linear-gradient(45deg, #FFD700, #FFA500)', boxShadow: '0 0 15px rgba(255, 215, 0, 0.6)', color: 'black', border: 'none', padding: '15px 30px', borderRadius: '10px', fontWeight: 'bold', cursor: 'pointer' }}
+                  />
+
+                  <label style={{ backgroundColor: '#10b981', color: 'white', padding: '15px 30px', borderRadius: '10px', fontWeight: 'bold', border: 'none', cursor: 'pointer', boxShadow: '0 0 15px rgba(16, 185, 129, 0.4)', display: 'flex', alignItems: 'center' }}>
+                    📥 Import from Excel <input type="file" hidden accept=".xlsx, .xls" onChange={handleImportExcel} />
+                  </label>
+                </div>
+              )}
             </div>
           </>
         )}
