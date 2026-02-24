@@ -28,12 +28,16 @@ const THEMES: Record<string, any> = {
 };
 const THEME_KEYS = Object.keys(THEMES);
 
+// --- DISTINCT PIE CHART COLORS (For Top 10) ---
 const PIE_COLORS = ['#f43f5e', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#d946ef', '#84cc16', '#f97316', '#64748b'];
+
+// Universal Educational Assets
 const UNIVERSAL_SYMBOLS = ['0', '1', 'A', 'Ω', '∑', 'π', '✓', 'Δ', '{ }', '< />', '?', '∞', '⚛'];
 const UNIVERSAL_QUOTES = ["Knowledge is power.", "Education is the passport to the future.", "Discipline equals freedom.", "Consistency is key to mastery.", "Every expert was once a beginner.", "Keep pushing forward!", "Success is built one day at a time."];
 
 const availableClassesList = ['Level 3', 'Level 4', 'A1', 'A2', 'A3'];
 
+// Helper: Get theme from email
 const getUserTheme = (email: string | undefined) => {
   if (!email) return THEMES['emerald'];
   let hash = 0;
@@ -41,12 +45,14 @@ const getUserTheme = (email: string | undefined) => {
   return THEMES[THEME_KEYS[hash % THEME_KEYS.length]];
 };
 
+// Helper: Progress Color Rule
 const getProgressColor = (val: number) => {
   if (val >= 80) return '#10b981';
   if (val >= 50) return '#f59e0b';
   return '#ef4444';
 };
 
+// Helper: Rank Crown Component
 const Crown = ({ rank, themeColor }: { rank: number, themeColor: string }) => {
   const colors = ['#FFD700', '#C0C0C0', '#CD7F32'];
   if (rank > 3) return <span style={{ width: '24px', display: 'inline-block' }}></span>;
@@ -57,8 +63,10 @@ const Crown = ({ rank, themeColor }: { rank: number, themeColor: string }) => {
   );
 };
 
+// --- 2. FLOATING BACKGROUND COMPONENT ---
 const FloatingBackground = ({ lightColor, onSymbolClick }: { lightColor: string, onSymbolClick: () => void }) => {
   const [elements, setElements] = useState<any[]>([]);
+
   useEffect(() => {
     setElements(Array.from({ length: 30 }).map((_, i) => ({
       id: i, val: UNIVERSAL_SYMBOLS[Math.floor(Math.random() * UNIVERSAL_SYMBOLS.length)],
@@ -66,6 +74,7 @@ const FloatingBackground = ({ lightColor, onSymbolClick }: { lightColor: string,
       size: `${16 + Math.random() * 30}px`, duration: `${15 + Math.random() * 20}s`, delay: `${Math.random() * 15}s`
     })));
   }, []);
+
   return (
     <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 0, overflow: 'hidden', pointerEvents: 'none' }}>
       {elements.map((el) => (
@@ -77,30 +86,37 @@ const FloatingBackground = ({ lightColor, onSymbolClick }: { lightColor: string,
   );
 };
 
+// --- 3. MAIN DASHBOARD COMPONENT ---
 export default function Dashboard() {
+  // Auth & User State
   const [teacher, setTeacher] = useState<any>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
 
+  // Data State
   const [subjects, setSubjects] = useState<any[]>([]);
   const [activeSubject, setActiveSubject] = useState<any>(null);
   const [selectedClass, setSelectedClass] = useState<string>('All Sections');
   const [students, setStudents] = useState<any[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<any | null>(null);
 
+  // UI State
   const [showAddSubject, setShowAddSubject] = useState(false);
   const [dialogueBox, setDialogueBox] = useState<string | null>(null);
   const [chartType, setChartType] = useState<'bar' | 'line' | 'pie'>('bar');
   const [showThemePicker, setShowThemePicker] = useState(false);
 
+  // New Subject Form State
   const [newSubName, setNewSubName] = useState('');
   const [newSubStart, setNewSubStart] = useState(2020);
   const [newSubEnd, setNewSubEnd] = useState(2025);
   const [newSubClasses, setNewSubClasses] = useState<string[]>([]);
   const [newSubPapersStr, setNewSubPapersStr] = useState('P1, P2');
   const [newSubMaxMarksStr, setNewSubMaxMarksStr] = useState('75, 50');
+  const [newSubVariants, setNewSubVariants] = useState<number>(1); // <-- ADDED VARIANTS STATE
 
+  // --- INITIAL LOAD ---
   useEffect(() => {
     const stored = localStorage.getItem('school_teacher_auth');
     if (stored) {
@@ -110,6 +126,7 @@ export default function Dashboard() {
     }
   }, []);
 
+  // --- DATA FETCHING ---
   async function fetchSubjects(tId: string) {
     const { data } = await supabase.from('subjects').select('*').eq('teacher_id', tId);
     if (data && data.length > 0) {
@@ -171,7 +188,6 @@ export default function Dashboard() {
       const sessionMaxSum = activeSubject.max_marks ? activeSubject.max_marks.reduce((a:number, b:number) => a + b, 0) : (activeSubject.papers?.length || 4) * 75;
       const maxPossible = activeSessionsCount === 0 ? sessionMaxSum : activeSessionsCount * sessionMaxSum;
 
-      // LOGIC FIX: Keep exact percentage for sorting, rounded for display
       const exactPercentage = maxPossible > 0 ? (grandTotal / maxPossible) * 100 : 0;
       const displayPercentage = Math.round(exactPercentage);
 
@@ -179,7 +195,7 @@ export default function Dashboard() {
         ...s, className, maxPossible,
         total: grandTotal,
         percentage: displayPercentage,
-        exactPercentage: exactPercentage, // Hidden exact value to break ties
+        exactPercentage: exactPercentage,
         progress: progMap[s.id] || {},
         all_entries: currentSubjectEntries,
         globalRank: 0,
@@ -187,12 +203,10 @@ export default function Dashboard() {
       };
     });
 
-    // Sort by EXACT percentage to break 89% vs 88.75% ties
     processed.sort((a, b) => b.exactPercentage - a.exactPercentage);
 
     let gRank = 1;
     processed.forEach((s, i) => {
-      // Rank updates only if the exact percentage is strictly less
       if (i > 0 && s.exactPercentage < processed[i - 1].exactPercentage) gRank = i + 1;
       s.globalRank = gRank;
     });
@@ -208,6 +222,8 @@ export default function Dashboard() {
 
     setStudents(processed);
   }
+
+  // --- EVENT HANDLERS ---
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
@@ -232,7 +248,7 @@ export default function Dashboard() {
 
   const handleSymbolClick = () => { setDialogueBox(UNIVERSAL_QUOTES[Math.floor(Math.random() * UNIVERSAL_QUOTES.length)]); };
 
-  const openAddSubject = () => { setNewSubName(''); setNewSubStart(2020); setNewSubEnd(2025); setNewSubClasses([]); setNewSubPapersStr('P1, P2'); setNewSubMaxMarksStr('75, 50'); setShowAddSubject(true); };
+  const openAddSubject = () => { setNewSubName(''); setNewSubStart(2020); setNewSubEnd(2025); setNewSubClasses([]); setNewSubPapersStr('P1, P2'); setNewSubMaxMarksStr('75, 50'); setNewSubVariants(1); setShowAddSubject(true); };
 
   const handleSaveSubject = async () => {
     if (!newSubName || newSubClasses.length === 0) return alert("Please fill name and select at least one class.");
@@ -240,7 +256,17 @@ export default function Dashboard() {
     const maxMarksArray = newSubMaxMarksStr.split(',').map(m => parseInt(m.trim())).filter(m => !isNaN(m));
     if (papersArray.length > 4) return alert("Maximum 4 papers allowed currently.");
     if (papersArray.length !== maxMarksArray.length) return alert("The number of papers MUST match the number of max marks!");
-    const { data, error } = await supabase.from('subjects').insert({ teacher_id: teacher.id, name: newSubName, classes: newSubClasses, start_year: newSubStart, end_year: newSubEnd, papers: papersArray, max_marks: maxMarksArray }).select().single();
+
+    const { data, error } = await supabase.from('subjects').insert({
+      teacher_id: teacher.id,
+      name: newSubName,
+      classes: newSubClasses,
+      start_year: newSubStart,
+      end_year: newSubEnd,
+      papers: papersArray,
+      max_marks: maxMarksArray,
+      variants: newSubVariants // <-- SAVING VARIANTS TO DB
+    }).select().single();
     if (!error && data) { setSubjects([...subjects, data]); setActiveSubject(data); setShowAddSubject(false); }
   };
 
@@ -269,7 +295,6 @@ export default function Dashboard() {
       setSelectedStudent({ ...selectedStudent, progress: updatedProg });
     }
 
-    // LOGIC FIX: Robust DB checking to prevent onConflict silent failures
     const { data: existing } = await supabase
       .from('subject_progress')
       .select('id')
@@ -278,16 +303,32 @@ export default function Dashboard() {
       .single();
 
     if (existing) {
-      await supabase.from('subject_progress').update({ progress: updatedProg }).eq('id', existing.id);
+      await supabase.from('subject_progress').update({ progress: JSON.stringify(updatedProg) }).eq('id', existing.id);
     } else {
-      await supabase.from('subject_progress').insert({ student_id: studentId, subject_id: activeSubject.id, progress: updatedProg });
+      await supabase.from('subject_progress').insert({ student_id: studentId, subject_id: activeSubject.id, progress: JSON.stringify(updatedProg) });
     }
   };
 
+  // --- SESSIONS LOGIC (UPDATED FOR VARIANTS) ---
   const sessions = useMemo(() => {
     if (!activeSubject) return [];
     const arr = [];
-    for (let y = activeSubject.end_year; y >= activeSubject.start_year; y--) { arr.push(`May/June ${y}`); arr.push(`Oct/Nov ${y}`); }
+    const vCount = activeSubject.variants || 1;
+
+    for (let y = activeSubject.end_year; y >= activeSubject.start_year; y--) {
+      if (vCount === 1) {
+        arr.push(`May/June ${y}`);
+        arr.push(`Oct/Nov ${y}`);
+      } else {
+        // Group all May/June variants together, then Oct/Nov variants together
+        for(let v = 1; v <= vCount; v++) {
+          arr.push(`May/June ${y} v${v}`);
+        }
+        for(let v = 1; v <= vCount; v++) {
+          arr.push(`Oct/Nov ${y} v${v}`);
+        }
+      }
+    }
     return arr;
   }, [activeSubject]);
 
@@ -296,11 +337,10 @@ export default function Dashboard() {
   const displayedStudents = selectedClass === 'All Sections' ? students : students.filter(s => s.className === selectedClass);
   const top10 = displayedStudents.slice(0, 10);
 
-  // CHART LOGIC FIX: Feeding calculated Percentage to charts
   const chartData = top10.map(s => ({
     name: s.name.split(' ')[0],
     fullName: s.name,
-    score: s.percentage, // Graph specifically tracks the accurate %
+    score: s.percentage,
     totalMarks: s.total,
     maxMarks: s.maxPossible
   }));
@@ -381,7 +421,11 @@ export default function Dashboard() {
             if (rowNumber > 1) {
               const nameValue = row.getCell(1).text?.trim();
               if (nameValue && nameValue !== '') {
-                studentsToInsert.push({ name: nameValue, subject_id: activeSubject.id, class_id: classData.id });
+                studentsToInsert.push({
+                  name: nameValue,
+                  subject_id: activeSubject.id,
+                  class_id: classData.id
+                });
               }
             }
           });
@@ -605,16 +649,41 @@ export default function Dashboard() {
         )}
       </div>
 
+      {/* --- ADD SUBJECT MODAL --- */}
       {showAddSubject && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 99999, pointerEvents: 'auto' }}>
           <div style={{ backgroundColor: 'white', padding: '30px', borderRadius: '16px', width: '450px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)' }}>
             <h2 style={{ color: theme.color, margin: '0 0 20px 0', fontSize: '24px' }}>Create New Subject</h2>
-            <p style={{ fontWeight: 'bold', marginBottom: '8px', color: '#374151' }}>Subject Name:</p><input placeholder="e.g. A-Level Math" value={newSubName} onChange={e=>setNewSubName(e.target.value)} style={{ width: '100%', padding: '12px', marginBottom: '15px', borderRadius: '8px', border: '2px solid #e5e7eb', outline: 'none', boxSizing: 'border-box' }} />
-            <p style={{ fontWeight: 'bold', marginBottom: '8px', color: '#374151' }}>Custom Papers (Comma Separated):</p><input placeholder="e.g. P1, M1, P2, S1" value={newSubPapersStr} onChange={e=>setNewSubPapersStr(e.target.value)} style={{ width: '100%', padding: '12px', marginBottom: '15px', borderRadius: '8px', border: '2px solid #e5e7eb', outline: 'none', boxSizing: 'border-box' }} />
-            <p style={{ fontWeight: 'bold', marginBottom: '8px', color: '#374151' }}>Max Marks Per Paper (Comma Separated):</p><input placeholder="e.g. 75, 50, 75, 50" value={newSubMaxMarksStr} onChange={e=>setNewSubMaxMarksStr(e.target.value)} style={{ width: '100%', padding: '12px', marginBottom: '15px', borderRadius: '8px', border: '2px solid #e5e7eb', outline: 'none', boxSizing: 'border-box' }} />
-            <p style={{ fontWeight: 'bold', marginBottom: '8px', color: '#374151' }}>Past Paper Range:</p><div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}><input type="number" value={newSubStart} onChange={e=>setNewSubStart(Number(e.target.value))} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '2px solid #e5e7eb', outline: 'none' }} /><span style={{ alignSelf: 'center', fontWeight: 'bold', color: '#6b7280' }}>to</span><input type="number" value={newSubEnd} onChange={e=>setNewSubEnd(Number(e.target.value))} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '2px solid #e5e7eb', outline: 'none' }} /></div>
-            <p style={{ fontWeight: 'bold', marginBottom: '8px', color: '#374151' }}>Select Classes:</p><div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '25px' }}>{availableClassesList.map(c => (<label key={c} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', backgroundColor: '#f3f4f6', padding: '6px 12px', borderRadius: '20px', fontWeight: 'bold', fontSize: '14px' }}><input type="checkbox" checked={newSubClasses.includes(c)} onChange={(e) => { if (e.target.checked) setNewSubClasses([...newSubClasses, c]); else setNewSubClasses(newSubClasses.filter(x => x !== c)); }} style={{ accentColor: theme.color }} /> {c}</label>))}</div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}><button onClick={() => setShowAddSubject(false)} style={{ padding: '10px 20px', border: 'none', background: '#f3f4f6', color: '#374151', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>Cancel</button><button onClick={handleSaveSubject} style={{ padding: '10px 20px', backgroundColor: theme.color, color: 'white', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>Save Subject</button></div>
+
+            <p style={{ fontWeight: 'bold', marginBottom: '8px', color: '#374151' }}>Subject Name:</p>
+            <input placeholder="e.g. A-Level Math" value={newSubName} onChange={e=>setNewSubName(e.target.value)} style={{ width: '100%', padding: '12px', marginBottom: '15px', borderRadius: '8px', border: '2px solid #e5e7eb', outline: 'none', boxSizing: 'border-box' }} />
+
+            <p style={{ fontWeight: 'bold', marginBottom: '8px', color: '#374151' }}>Custom Papers (Comma Separated):</p>
+            <input placeholder="e.g. P1, M1, P2, S1" value={newSubPapersStr} onChange={e=>setNewSubPapersStr(e.target.value)} style={{ width: '100%', padding: '12px', marginBottom: '15px', borderRadius: '8px', border: '2px solid #e5e7eb', outline: 'none', boxSizing: 'border-box' }} />
+
+            <p style={{ fontWeight: 'bold', marginBottom: '8px', color: '#374151' }}>Max Marks Per Paper (Comma Separated):</p>
+            <input placeholder="e.g. 75, 50, 75, 50" value={newSubMaxMarksStr} onChange={e=>setNewSubMaxMarksStr(e.target.value)} style={{ width: '100%', padding: '12px', marginBottom: '15px', borderRadius: '8px', border: '2px solid #e5e7eb', outline: 'none', boxSizing: 'border-box' }} />
+
+            {/* NEW ADDITION: Variants Input */}
+            <p style={{ fontWeight: 'bold', marginBottom: '8px', color: '#374151' }}>Number of Variants:</p>
+            <input type="number" min="1" max="5" value={newSubVariants} onChange={e=>setNewSubVariants(Number(e.target.value))} style={{ width: '100%', padding: '12px', marginBottom: '15px', borderRadius: '8px', border: '2px solid #e5e7eb', outline: 'none', boxSizing: 'border-box' }} />
+
+            <p style={{ fontWeight: 'bold', marginBottom: '8px', color: '#374151' }}>Past Paper Range:</p>
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+               <input type="number" value={newSubStart} onChange={e=>setNewSubStart(Number(e.target.value))} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '2px solid #e5e7eb', outline: 'none' }} />
+               <span style={{ alignSelf: 'center', fontWeight: 'bold', color: '#6b7280' }}>to</span>
+               <input type="number" value={newSubEnd} onChange={e=>setNewSubEnd(Number(e.target.value))} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '2px solid #e5e7eb', outline: 'none' }} />
+            </div>
+
+            <p style={{ fontWeight: 'bold', marginBottom: '8px', color: '#374151' }}>Select Classes:</p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '25px' }}>
+               {availableClassesList.map(c => (<label key={c} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', backgroundColor: '#f3f4f6', padding: '6px 12px', borderRadius: '20px', fontWeight: 'bold', fontSize: '14px' }}><input type="checkbox" checked={newSubClasses.includes(c)} onChange={(e) => { if (e.target.checked) setNewSubClasses([...newSubClasses, c]); else setNewSubClasses(newSubClasses.filter(x => x !== c)); }} style={{ accentColor: theme.color }} /> {c}</label>))}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+               <button onClick={() => setShowAddSubject(false)} style={{ padding: '10px 20px', border: 'none', background: '#f3f4f6', color: '#374151', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>Cancel</button>
+               <button onClick={handleSaveSubject} style={{ padding: '10px 20px', backgroundColor: theme.color, color: 'white', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' }}>Save Subject</button>
+            </div>
           </div>
         </div>
       )}
